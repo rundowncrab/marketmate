@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Financial Chatbot</title>
+  <style>
+    body {
+      display: flex;
+      font-family: Arial, sans-serif;
+    }
+    .sidebar {
+      width: 250px;
+      border-right: 1px solid #ccc;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 10px;
+    }
+    .chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .messages {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+      background: #f5f5f5;
+    }
+    .message {
+      margin-bottom: 10px;
+    }
+    .message.user {
+      font-weight: bold;
+      color: #1a73e8;
+    }
+    .message.assistant {
+      color: #000;
+    }
+    .input-form {
+      display: flex;
+      flex-direction: column;
+      padding: 10px;
+      border-top: 1px solid #ccc;
+      background: #fff;
+    }
+    .input-form select, .input-form input, .input-form button {
+      margin-bottom: 10px;
+    }
+    .chat-link {
+      cursor: pointer;
+      padding: 5px;
+      border-bottom: 1px solid #eee;
+    }
+    .chat-link:hover {
+      background-color: #f0f0f0;
+    }
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <button onclick="startNewChat()">+ New Chat</button>
+    <h3>Previous Chats</h3>
+    <div id="previous-chats"></div>
+  </div>
+
+  <div class="chat-container">
+    <div class="messages" id="messages"></div>
+    <form class="input-form" onsubmit="sendMessage(event)">
+      <select id="model-select">
+        <option value="gpt-4o">gpt-4o</option>
+        <option value="gpt-4">gpt-4</option>
+        <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+      </select>
+      <input type="text" id="user-input" placeholder="Ask about financial markets..." required />
+      <button type="submit">Send</button>
+    </form>
+  </div>
+
+  <script>
+    async function fetchPreviousChats() {
+      const res = await fetch("/get-previous-chats");
+      const data = await res.json();
+      const container = document.getElementById("previous-chats");
+      container.innerHTML = "";
+      data.previous_chats.forEach((chat, index) => {
+        const div = document.createElement("div");
+        div.className = "chat-link";
+        div.textContent = chat.find(m => m.role === "user")?.content || "Previous chat";
+        div.onclick = () => switchConversation(index);
+        container.appendChild(div);
+      });
+    }
+
+    async function switchConversation(index) {
+      const response = await fetch("/switch-conversation", {
+        method: "POST",
+        headers: {"Content-Type": "application/x-www-form-urlencoded"},
+        body: new URLSearchParams({conversation_index: index})
+      });
+
+      const data = await response.json();
+      if (data.message === "Switched successfully.") {
+        updateMessages(data.chat_history);
+      }
+    }
+
+    function updateMessages(chatHistory) {
+      const messagesDiv = document.getElementById("messages");
+      messagesDiv.innerHTML = "";  // Clear the current messages
+
+      chatHistory.forEach(message => {
+        const messageDiv = document.createElement("div");
+        messageDiv.classList.add("message", message.role);
+        messageDiv.textContent = message.content;
+        messagesDiv.appendChild(messageDiv);
+      });
+
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    async function startNewChat() {
+      await fetch("/new-chat", {method: "POST"});
+      location.reload();
+    }
+
+    async function sendMessage(e) {
+      e.preventDefault();
+      const input = document.getElementById("user-input");
+      const model = document.getElementById("model-select").value;
+      const text = input.value;
+
+      const res = await fetch("/send-message", {
+        method: "POST",
+        body: new URLSearchParams({text, model})
+      });
+
+      const data = await res.json();
+      if (data.openai_response) {
+        const messagesDiv = document.getElementById("messages");
+        messagesDiv.innerHTML += `<div class="message user">${text}</div>`;
+        messagesDiv.innerHTML += `<div class="message assistant">${data.openai_response}</div>`;
+        input.value = "";
+        fetchPreviousChats();
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      } else if (data.error) {
+        alert(data.error);
+      }
+    }
+
+    window.onload = fetchPreviousChats;
+  </script>
+</body>
+</html>
