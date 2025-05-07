@@ -80,5 +80,5 @@ Clone the repository:
    
 2. Run the app:
 ```bash
-uvicorn main:app --reload
+uvicorn main2:app --reload
 Open in browser: http://127.0.0.1:8000
