@@ -36,10 +36,10 @@ SYSTEM_MESSAGE = {
 
 #Setting up the rate limits as per the example
 tier_limits = {
-    ("Free", "OpenAI", "gpt-4o"): {"rpm": 3, "rpd": 200, "tpm": 40000, "tpd": 1000000},
-    ("Tier-1", "OpenAI", "gpt-4o"): {"rpm": 500, "rpd": 10000, "tpm": 200000, "tpd": 5000000},
-    ("Tier-2", "OpenAI", "gpt-4o"): {"rpm": 5000, "rpd": 100000, "tpm": 2000000, "tpd": 50000000},
-    ("Tier-3", "OpenAI", "gpt-4o"): {"rpm": 50000, "rpd": 1000000, "tpm": 20000000, "tpd": 500000000}
+    "Free": {"rpm": 3, "rpd": 200},
+    "Tier-1": {"rpm": 500, "rpd": 10000},
+    "Tier-2": {"rpm": 5000, "rpd": 100000},
+    "Tier-3": {"rpm": 50000, "rpd": 1000000},
 }
 
 
@@ -82,53 +82,40 @@ async def new_chat(request: Request):
 
 @app.post("/send-message")
 async def send_message(request: Request, text: str = Form(...), model: str = Form(...)):
-    # --- Tiered Rate Limiting Snippet START ---
-    user_id = request.session.get("user_id", "default_user")
+      # --- Tiered Rate Limiting Snippet START (Mock Only) ---
+    session_id = str(request.session.get("session_id") or id(request.session))
     tier = request.session.get("tier", "Free")
-    provider = "OpenAI"
-    key = (tier, provider, model)
 
-    now = time.time()
-    usage = usage_tracker[user_id][key]
-    limits = tier_limits.get(key)
-
+    limits = tier_limits.get(tier)
     if not limits:
         raise HTTPException(
             status_code=400,
-            detail=f"Rate limits not defined for: Tier={tier}, Provider={provider}, Model={model}. Please check your configuration."
+            detail=f"Rate limits not defined for Tier='{tier}'. Please check your configuration."
         )
-    required_keys = ["rpm", "rpd", "tpm", "tpd"]
+
+    required_keys = ["rpm", "rpd"]
     for k in required_keys:
         if k not in limits:
             raise HTTPException(
                 status_code=500,
-                detail=f"Missing rate limit key '{k}' in tier_limits for {key}."
+                detail=f"Missing rate limit key '{k}' in tier_limits for Tier='{tier}'."
             )
 
-    # Clean timestamps older than 1 min (rpm) and 1 day (rpd)
+    usage = usage_tracker.setdefault(session_id, {"rpm": [], "rpd": []})
+    now = time.time()
     usage["rpm"] = [t for t in usage["rpm"] if now - t < 60]
     usage["rpd"] = [t for t in usage["rpd"] if now - t < 86400]
 
-    # Token count estimate
-    token_count = len(text.split())
-
-     # Enforce rate limits
     if len(usage["rpm"]) >= limits["rpm"]:
-        raise HTTPException(status_code=429, detail="Rate limit exceeded: Too many requests per minute. Please wait and try again.")
+        raise HTTPException(status_code=429, detail="Rate limit exceeded: Too many requests per minute.")
     if len(usage["rpd"]) >= limits["rpd"]:
-        raise HTTPException(status_code=429, detail="Daily request limit reached. Upgrade your plan for more access.")
-    if usage["tpm"] + token_count > limits["tpm"]:
-        raise HTTPException(status_code=429, detail="Token per minute limit exceeded. Please wait a moment.")
-    if usage["tpd"] + token_count > limits["tpd"]:
-        raise HTTPException(status_code=429, detail="Daily token limit reached. Upgrade your plan for more usage.")
+        raise HTTPException(status_code=429, detail="Daily request limit reached.")
 
-    # Record usage
     usage["rpm"].append(now)
     usage["rpd"].append(now)
-    usage["tpm"] += token_count
-    usage["tpd"] += token_count
     # --- Tiered Rate Limiting Snippet END ---
 
+    # Chat logic
     chat_history = request.session.get("chat_history", [SYSTEM_MESSAGE])
     chat_history.append({"role": "user", "content": text})
 
@@ -136,9 +123,8 @@ async def send_message(request: Request, text: str = Form(...), model: str = For
     response = "I'm sorry, I can only help with financial market-related questions."
     company_name = extract_company_name(text)
     current_date = datetime.now().strftime("%Y-%m-%d")
-    quarter = "Q4 FY24"  # For now, use a static example
+    quarter = "Q4 FY24"
 
-     # Branch: Handle financial news request
     if "news" in lower_text or "financial news" in lower_text or "latest update" in lower_text:
         if company_name != "Unknown Company":
             response_data = get_financial_news({
@@ -152,13 +138,12 @@ async def send_message(request: Request, text: str = Form(...), model: str = For
             else:
                 response = f"No recent financial news found for {company_name}."
 
-    # Branch: Handle quarterly result request
     elif any(kw in lower_text for kw in ["quarter", "results", "balance", "profit", "revenue", "transcript"]):
         if company_name != "Unknown Company":
             response_data = get_quarterly_results({
                 "company_name": company_name,
                 "quarter": quarter,
-                "api_key": "demo"  # Placeholder
+                "api_key": "demo"
             })
             response = (
                 f"Quarterly Financial Results for {response_data['company_name']} ({response_data['quarter']}):\n"
@@ -171,7 +156,6 @@ async def send_message(request: Request, text: str = Form(...), model: str = For
     chat_history.append({"role": "assistant", "content": response})
     request.session["chat_history"] = chat_history
 
-    # Sync current conversation to previous chats
     previous_chats = request.session.get("previous_chats", [])
     active_index = request.session.get("active_index")
     if active_index is not None and 0 <= active_index < len(previous_chats):
