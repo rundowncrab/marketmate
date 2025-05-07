@@ -3,89 +3,187 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 import os
-import openai
-from typing import Optional
-
-# Load environment variable
 from dotenv import load_dotenv
-load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+from copy import deepcopy
+from mock_apis import get_financial_news, get_quarterly_results
+from datetime import datetime, timedelta
+from collections import defaultdict
+import time
 
-# Constants
+# Setup
+load_dotenv()
+app = FastAPI()
+app.add_middleware(SessionMiddleware, secret_key='super-secret-key')
+templates = Jinja2Templates(directory="templates")
+
+usage_tracker = defaultdict(lambda: defaultdict(lambda: {"rpm": [], "rpd": [], "tpm": 0, "tpd": 0}))
+
 SYSTEM_MESSAGE = {
     "role": "system",
     "content": "You are a helpful financial assistant. Only respond to questions about financial data, stock performance, market news, or company reports. Do not answer unrelated questions."
 }
 
-TIER_LIMITS = {
-    "free": {"RPM": 3, "RPD": 200, "TPM": 40000, "TPD": 1000000},
-    "tier1": {"RPM": 500, "RPD": 10000, "TPM": 200000, "TPD": 5000000},
-    "tier2": {"RPM": 5000, "RPD": 100000, "TPM": 2000000, "TPD": 50000000},
-    "tier3": {"RPM": 50000, "RPD": 1000000, "TPM": 20000000, "TPD": 500000000}
+tier_limits = {
+    ("Free", "OpenAI", "gpt-4o"): {"rpm": 3, "rpd": 200, "tpm": 40000, "tpd": 1000000},
+    ("Tier-1", "OpenAI", "gpt-4o"): {"rpm": 500, "rpd": 10000, "tpm": 200000, "tpd": 5000000},
+    ("Tier-2", "OpenAI", "gpt-4o"): {"rpm": 5000, "rpd": 100000, "tpm": 2000000, "tpd": 50000000},
+    ("Tier-3", "OpenAI", "gpt-4o"): {"rpm": 50000, "rpd": 1000000, "tpm": 20000000, "tpd": 500000000}
 }
 
-# Setup FastAPI
-app = FastAPI()
-app.add_middleware(SessionMiddleware, secret_key='super-secret-key')
-templates = Jinja2Templates(directory="templates")
-
-# LLM Response
-async def get_openai_response(model: str, chat_history: list):
-    return {"content": "hey how are you"}
-    # try:
-    #     response = openai.chat.completions.create(
-    #         model=model,
-    #         messages=chat_history
-    #     )
-    #     return {"content": response.choices[0].message.content}
-    # except Exception as e:
-    #     raise RuntimeError(f"Error with OpenAI API: {str(e)}")
-
-# Serve index
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
     if "chat_history" not in request.session:
         request.session["chat_history"] = [SYSTEM_MESSAGE]
     if "previous_chats" not in request.session:
         request.session["previous_chats"] = []
+    if "active_index" not in request.session:
+        request.session["active_index"] = None
     return templates.TemplateResponse("site.html", {"request": request})
 
-# New chat
 @app.post("/new-chat")
 async def new_chat(request: Request):
-    chat_history = request.session.get("chat_history", [SYSTEM_MESSAGE])
-    if "previous_chats" not in request.session:
-        request.session["previous_chats"] = []
-    request.session["previous_chats"].append(chat_history.copy())
-    request.session["chat_history"] = [SYSTEM_MESSAGE]
+    previous_chats = request.session.get("previous_chats", [])
+    current_chat = request.session.get("chat_history", [])
+
+    # If current_chat is valid and was being worked on, save it properly
+    if current_chat and current_chat != [SYSTEM_MESSAGE]:
+        active_index = request.session.get("active_index")
+        if active_index is not None and 0 <= active_index < len(previous_chats):
+            previous_chats[active_index] = current_chat
+        elif current_chat not in previous_chats:
+            previous_chats.append(current_chat)
+
+    # Start a fresh new chat
+    new_chat = [SYSTEM_MESSAGE]
+    previous_chats.append(new_chat)
+    request.session["chat_history"] = new_chat
+    request.session["previous_chats"] = previous_chats
+    request.session["active_index"] = len(previous_chats) - 1  # Set new active index
+
     return JSONResponse({"message": "New chat started."})
 
-# Send message
 @app.post("/send-message")
 async def send_message(request: Request, text: str = Form(...), model: str = Form(...)):
-    try:
-        chat_history = request.session.get("chat_history", [SYSTEM_MESSAGE])
-        chat_history.append({"role": "user", "content": text})
-        response = await get_openai_response(model, chat_history)
-        ai_message = {"role": "assistant", "content": response["content"]}
-        chat_history.append(ai_message)
-        request.session["chat_history"] = chat_history
-        return JSONResponse({"openai_response": response["content"]})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+    # --- Tiered Rate Limiting Snippet START ---
+    user_id = request.session.get("user_id", "default_user")
+    tier = request.session.get("tier", "Free")
+    provider = "OpenAI"
+    key = (tier, provider, model)
 
-# Switch conversation - Change to accept JSON payload
+    now = time.time()
+    usage = usage_tracker[user_id][key]
+    limits = tier_limits.get(key)
+
+    if not limits:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Rate limits not defined for: Tier={tier}, Provider={provider}, Model={model}. Please check your configuration."
+        )
+    required_keys = ["rpm", "rpd", "tpm", "tpd"]
+    for k in required_keys:
+        if k not in limits:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Missing rate limit key '{k}' in tier_limits for {key}."
+            )
+
+    # Clean old timestamps
+    usage["rpm"] = [t for t in usage["rpm"] if now - t < 60]
+    usage["rpd"] = [t for t in usage["rpd"] if now - t < 86400]
+
+    # Token count estimate
+    token_count = len(text.split())
+
+    if len(usage["rpm"]) >= limits["rpm"]:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded: Too many requests per minute. Please wait and try again.")
+    if len(usage["rpd"]) >= limits["rpd"]:
+        raise HTTPException(status_code=429, detail="Daily request limit reached. Upgrade your plan for more access.")
+    if usage["tpm"] + token_count > limits["tpm"]:
+        raise HTTPException(status_code=429, detail="Token per minute limit exceeded. Please wait a moment.")
+    if usage["tpd"] + token_count > limits["tpd"]:
+        raise HTTPException(status_code=429, detail="Daily token limit reached. Upgrade your plan for more usage.")
+
+    # Record usage
+    usage["rpm"].append(now)
+    usage["rpd"].append(now)
+    usage["tpm"] += token_count
+    usage["tpd"] += token_count
+    # --- Tiered Rate Limiting Snippet END ---
+
+    chat_history = request.session.get("chat_history", [SYSTEM_MESSAGE])
+    chat_history.append({"role": "user", "content": text})
+
+    lower_text = text.lower()
+    response = "I'm sorry, I can only help with financial market-related questions."
+    company_name = extract_company_name(text)
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    quarter = "Q4 FY24"  # For now, use a static example
+
+    if "news" in lower_text or "financial news" in lower_text or "latest update" in lower_text:
+        if company_name != "Unknown Company":
+            response_data = get_financial_news({
+                "company_name": company_name,
+                "date": current_date
+            })
+            if response_data.get("news"):
+                response = f"Latest Financial News for {company_name}:\n"
+                for article in response_data["news"]:
+                    response += f"- {article['headline']} ({article['date']} via {article['source']}): {article['description']}\n"
+            else:
+                response = f"No recent financial news found for {company_name}."
+
+    elif any(kw in lower_text for kw in ["quarter", "results", "balance", "profit", "revenue", "transcript"]):
+        if company_name != "Unknown Company":
+            response_data = get_quarterly_results({
+                "company_name": company_name,
+                "quarter": quarter,
+                "api_key": "demo"  # Placeholder
+            })
+            response = (
+                f"Quarterly Financial Results for {response_data['company_name']} ({response_data['quarter']}):\n"
+                f"- P/E Ratio: {response_data['valuation_ratios']['pe_ratio']}\n"
+                f"- P/B Ratio: {response_data['valuation_ratios']['pb_ratio']}\n"
+                f"- [Balance Sheet]({response_data['files']['balance_sheet_excel']})\n"
+                f"- [Analyst Call Transcript]({response_data['files']['analyst_call_transcript_doc']})"
+            )
+
+    chat_history.append({"role": "assistant", "content": response})
+    request.session["chat_history"] = chat_history
+
+    previous_chats = request.session.get("previous_chats", [])
+    active_index = request.session.get("active_index")
+    if active_index is not None and 0 <= active_index < len(previous_chats):
+        previous_chats[active_index] = chat_history
+        request.session["previous_chats"] = previous_chats
+
+    return JSONResponse({"openai_response": chat_history[-1]["content"]})
+
 @app.post("/switch-conversation")
 async def switch_conversation(request: Request, conversation_index: int = Form(...)):
     previous_chats = request.session.get("previous_chats", [])
     if 0 <= conversation_index < len(previous_chats):
-        request.session["chat_history"] = previous_chats[conversation_index]
-        return JSONResponse({"message": "Switched successfully.", "chat_history": previous_chats[conversation_index]})
+        request.session["chat_history"] = deepcopy(previous_chats[conversation_index])
+        request.session["active_index"] = conversation_index
+        return JSONResponse({
+            "message": "Switched successfully.",
+            "chat_history": request.session["chat_history"]
+        })
+
     raise HTTPException(status_code=404, detail="Conversation not found")
 
-
-# Get previous chats
 @app.get("/get-previous-chats")
 async def get_previous_chats(request: Request):
-    previous_chats = request.session.get("previous_chats", [])
-    return JSONResponse({"previous_chats": previous_chats})
+    return JSONResponse({"previous_chats": request.session.get("previous_chats", [])})
+
+def extract_company_name(text: str) -> str:
+    # Dummy version — ideally use a proper NER or company list
+    for company in ["Tata", "Infosys", "Reliance"]:
+        if company.lower() in text.lower():
+            return company
+    return "Unknown Company"
+
+
+@app.get("/reset")
+async def reset_session(request: Request):
+    request.session.clear()
+    return {"message": "Session cleared"}

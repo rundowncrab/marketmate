@@ -6,10 +6,11 @@
     body {
       display: flex;
       font-family: Arial, sans-serif;
+      background-color: #998FC7;
     }
     .sidebar {
       width: 250px;
-      border-right: 1px solid #ccc;
+      border-right: 1px solid #1ccbab;
       height: 100vh;
       overflow-y: auto;
       padding: 10px;
@@ -19,19 +20,20 @@
       display: flex;
       flex-direction: column;
       height: 100vh;
+      background-color: #F9F5FF ;
     }
     .messages {
       flex: 1;
       padding: 20px;
       overflow-y: auto;
-      background: #f5f5f5;
+      background: #D4C2FC;
     }
     .message {
       margin-bottom: 10px;
     }
     .message.user {
       font-weight: bold;
-      color: #1a73e8;
+      color: #39375B;
     }
     .message.assistant {
       color: #000;
@@ -41,7 +43,7 @@
       flex-direction: column;
       padding: 10px;
       border-top: 1px solid #ccc;
-      background: #fff;
+      background: #413C58;
     }
     .input-form select, .input-form input, .input-form button {
       margin-bottom: 10px;
@@ -54,11 +56,33 @@
     .chat-link:hover {
       background-color: #f0f0f0;
     }
+    .highlighted {
+      background-color: #e0e0e0;
+      font-weight: bold;
+      color: #14248A;
+    }
+    #sendbtn{
+      background-color: #542344;
+      font-weight: bold;
+      color: white;
+    }
+    #newchatbtn{
+      background-color: #542344;
+      font-weight: bold;
+      color: white;
+    }
+    #model-select{
+        background-color: #998FC7;
+    }
+    #user-input{
+        background-color: #998FC7;
+        color: white;
+    }
   </style>
 </head>
 <body>
   <div class="sidebar">
-    <button onclick="startNewChat()">+ New Chat</button>
+    <button onclick="startNewChat()" id="newchatbtn">+ New Chat</button>
     <h3>Previous Chats</h3>
     <div id="previous-chats"></div>
   </div>
@@ -72,55 +96,61 @@
         <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
       </select>
       <input type="text" id="user-input" placeholder="Ask about financial markets..." required />
-      <button type="submit">Send</button>
+      <button type="submit" id="sendbtn">Send</button>
     </form>
   </div>
 
   <script>
+    let activeIndex = null;
+
     async function fetchPreviousChats() {
       const res = await fetch("/get-previous-chats");
       const data = await res.json();
       const container = document.getElementById("previous-chats");
       container.innerHTML = "";
+
       data.previous_chats.forEach((chat, index) => {
         const div = document.createElement("div");
-        div.className = "chat-link";
-        div.textContent = chat.find(m => m.role === "user")?.content || "Previous chat";
+        div.className = "chat-link" + (index === activeIndex ? " highlighted" : "");
+        const firstUserMessage = chat.find(m => m.role === "user");
+        div.textContent = firstUserMessage ? firstUserMessage.content : "Chat " + (index + 1);
         div.onclick = () => switchConversation(index);
         container.appendChild(div);
       });
     }
 
     async function switchConversation(index) {
-      const response = await fetch("/switch-conversation", {
+      await fetch("/switch-conversation", {
         method: "POST",
         headers: {"Content-Type": "application/x-www-form-urlencoded"},
         body: new URLSearchParams({conversation_index: index})
-      });
-
-      const data = await response.json();
-      if (data.message === "Switched successfully.") {
-        updateMessages(data.chat_history);
-      }
-    }
-
-    function updateMessages(chatHistory) {
-      const messagesDiv = document.getElementById("messages");
-      messagesDiv.innerHTML = "";  // Clear the current messages
-
-      chatHistory.forEach(message => {
-        const messageDiv = document.createElement("div");
-        messageDiv.classList.add("message", message.role);
-        messageDiv.textContent = message.content;
-        messagesDiv.appendChild(messageDiv);
-      });
-
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      }).then(res => res.json())
+        .then(data => {
+          if (data.chat_history) {
+            activeIndex = index;
+            updateMessages(data.chat_history);
+            fetchPreviousChats();
+          }
+        });
     }
 
     async function startNewChat() {
       await fetch("/new-chat", {method: "POST"});
-      location.reload();
+      activeIndex = null;
+      updateMessages([]);
+      fetchPreviousChats();
+    }
+
+    function updateMessages(chatHistory) {
+      const messagesDiv = document.getElementById("messages");
+      messagesDiv.innerHTML = "";
+      chatHistory.forEach(message => {
+        const div = document.createElement("div");
+        div.className = "message " + message.role;
+        div.textContent = message.content;
+        messagesDiv.appendChild(div);
+      });
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
 
     async function sendMessage(e) {
@@ -137,13 +167,11 @@
       const data = await res.json();
       if (data.openai_response) {
         const messagesDiv = document.getElementById("messages");
-        messagesDiv.innerHTML += `<div class="message user">${text}</div>`;
-        messagesDiv.innerHTML += `<div class="message assistant">${data.openai_response}</div>`;
+        messagesDiv.innerHTML += ` <div class="message user">${text}</div>`;
+        messagesDiv.innerHTML += ` <div class="message assistant">${data.openai_response}</div>`;
         input.value = "";
         fetchPreviousChats();
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
-      } else if (data.error) {
-        alert(data.error);
       }
     }
 
