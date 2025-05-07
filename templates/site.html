@@ -81,34 +81,46 @@
   </style>
 </head>
 <body>
+  <!-- Sidebar for creating new chat and listing past chats -->
   <div class="sidebar">
     <button onclick="startNewChat()" id="newchatbtn">+ New Chat</button>
     <h3>Previous Chats</h3>
     <div id="previous-chats"></div>
   </div>
 
+  <!-- Main chat window -->
   <div class="chat-container">
+
+    <!-- Chat message display area -->
     <div class="messages" id="messages"></div>
+
+    <!-- Chat input form -->
     <form class="input-form" onsubmit="sendMessage(event)">
+
+      <!-- Model selection dropdown -->
       <select id="model-select">
         <option value="gpt-4o">gpt-4o</option>
         <option value="gpt-4">gpt-4</option>
         <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
       </select>
+
+       <!-- User message input -->
       <input type="text" id="user-input" placeholder="Ask about financial markets..." required />
       <button type="submit" id="sendbtn">Send</button>
     </form>
   </div>
 
   <script>
-    let activeIndex = null;
+    let activeIndex = null;  // Tracks currently active chat index
 
+    // Load previous chat history links in sidebar
     async function fetchPreviousChats() {
       const res = await fetch("/get-previous-chats");
       const data = await res.json();
       const container = document.getElementById("previous-chats");
       container.innerHTML = "";
 
+      // Populate sidebar with previous chat
       data.previous_chats.forEach((chat, index) => {
         const div = document.createElement("div");
         div.className = "chat-link" + (index === activeIndex ? " highlighted" : "");
@@ -119,6 +131,8 @@
       });
     }
 
+
+    // Switch to a previously selected conversation
     async function switchConversation(index) {
       await fetch("/switch-conversation", {
         method: "POST",
@@ -134,6 +148,8 @@
         });
     }
 
+
+     // Start a new chat session
     async function startNewChat() {
       await fetch("/new-chat", {method: "POST"});
       activeIndex = null;
@@ -141,6 +157,7 @@
       fetchPreviousChats();
     }
 
+    // Render chat messages in the chat window
     function updateMessages(chatHistory) {
       const messagesDiv = document.getElementById("messages");
       messagesDiv.innerHTML = "";
@@ -153,6 +170,7 @@
       messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
 
+    // Send a message to the backend and update the UI with response
     async function sendMessage(e) {
       e.preventDefault();
       const input = document.getElementById("user-input");
@@ -175,6 +193,7 @@
       }
     }
 
+    // Load the previous chats on page load
     window.onload = fetchPreviousChats;
   </script>
 </body>

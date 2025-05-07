@@ -1,7 +1,3 @@
-# mock_apis.py
-
-# Example of a mock financial news function
-# mock_apis.py
 
 def get_financial_news(request_data):
     company_name = request_data.get("company_name", "Unknown")
