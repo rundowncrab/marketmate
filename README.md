@@ -77,6 +77,7 @@ Clone the repository:
    ```bash
    git clone https://github.com/<your-username>/marketmate.git
    cd marketmate
+   pip install -r requirements.txt
    
 2. Run the app:
 ```bash
