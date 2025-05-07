@@ -99,9 +99,9 @@
 
       <!-- Model selection dropdown -->
       <select id="model-select">
-        <option value="gpt-4o">gpt-4o</option>
-        <option value="gpt-4">gpt-4</option>
-        <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+        <option value="Free">Free</option>
+        <option value="Tier-1">Tier-1</option>
+        <option value="Tier-2">Tier-2</option>
       </select>
 
        <!-- User message input -->
@@ -174,12 +174,12 @@
     async function sendMessage(e) {
       e.preventDefault();
       const input = document.getElementById("user-input");
-      const model = document.getElementById("model-select").value;
+      const tier = document.getElementById("model-select").value;
       const text = input.value;
 
       const res = await fetch("/send-message", {
         method: "POST",
-        body: new URLSearchParams({text, model})
+        body: new URLSearchParams({text, tier})
       });
 
       const data = await res.json();

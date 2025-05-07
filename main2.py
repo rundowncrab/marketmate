@@ -52,6 +52,9 @@ async def get_index(request: Request):
         request.session["previous_chats"] = [] # List to store previous chats
     if "active_index" not in request.session:
         request.session["active_index"] = None# Index for the current active chat
+    if "session_id" not in request.session:
+        request.session["session_id"] = str(id(request.session))
+    
     # Render the 'site.html' template with the current session's data
     return templates.TemplateResponse("site.html", {"request": request})
 
@@ -81,12 +84,13 @@ async def new_chat(request: Request):
 
 
 @app.post("/send-message")
-async def send_message(request: Request, text: str = Form(...), model: str = Form(...)):
+async def send_message(request: Request, text: str = Form(...), tier: str = Form(...)):
       # --- Tiered Rate Limiting Snippet START (Mock Only) ---
+    request.session["tier"] = tier
     session_id = str(request.session.get("session_id") or id(request.session))
-    tier = request.session.get("tier", "Free")
-
+    tier=request.session.get("tier", "Free")
     limits = tier_limits.get(tier)
+
     if not limits:
         raise HTTPException(
             status_code=400,
@@ -111,6 +115,8 @@ async def send_message(request: Request, text: str = Form(...), model: str = For
     if len(usage["rpd"]) >= limits["rpd"]:
         raise HTTPException(status_code=429, detail="Daily request limit reached.")
 
+    # print(f"Session ID: {session_id}, RPM: {len(usage['rpm'])}, Limit: {limits['rpm']}")
+ 
     usage["rpm"].append(now)
     usage["rpd"].append(now)
     # --- Tiered Rate Limiting Snippet END ---
