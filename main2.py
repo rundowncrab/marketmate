@@ -176,7 +176,7 @@ async def send_message(request: Request, text: str = Form(...), tier: str = Form
 async def switch_conversation(request: Request, conversation_index: int = Form(...)):
     previous_chats = request.session.get("previous_chats", [])
     if 0 <= conversation_index < len(previous_chats):
-        request.session["chat_history"] = deepcopy(previous_chats[conversation_index])
+        request.session["chat_history"] = (previous_chats[conversation_index]) #it is adding the updated version of the chats in the previous chats 
         request.session["active_index"] = conversation_index
         return JSONResponse({
             "message": "Switched successfully.",
