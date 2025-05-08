@@ -168,7 +168,7 @@ async def send_message(request: Request, text: str = Form(...), tier: str = Form
         previous_chats[active_index] = chat_history
         request.session["previous_chats"] = previous_chats
 
-    return JSONResponse({"openai_response": chat_history[-1]["content"]})
+    return JSONResponse({"openai_response": chat_history[-1]["content"]}) #returns last chat, i.e. the openai_response just received
 
 
 #For switching up conversations i.e. going back to previous chats
