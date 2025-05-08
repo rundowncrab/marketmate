@@ -143,7 +143,7 @@
           if (data.chat_history) {
             activeIndex = index;
             updateMessages(data.chat_history);
-            fetchPreviousChats();
+            fetchPreviousChats(); // highlights the part too when the conversation is switched
           }
         });
     }
@@ -153,8 +153,8 @@
     async function startNewChat() {
       await fetch("/new-chat", {method: "POST"});
       activeIndex = null;
-      updateMessages([]);
-      fetchPreviousChats();
+      updateMessages([]); //clears the chat
+      fetchPreviousChats(); // if new chat then it renders chat 1, chat2 type of convo for new user with no message yet
     }
 
     // Render chat messages in the chat window
@@ -188,7 +188,7 @@
         messagesDiv.innerHTML += ` <div class="message user">${text}</div>`;
         messagesDiv.innerHTML += ` <div class="message assistant">${data.openai_response}</div>`;
         input.value = "";
-        fetchPreviousChats();
+        fetchPreviousChats(); //update the sidebar to the first character updated in new chat
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
       }
     }
